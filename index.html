@@ -110,7 +110,12 @@ label>*{margin-top:4px;font-weight:400}
     <input type="search" id="q" placeholder="Müşteri, kod veya onaylayan ara" aria-label="Ara">
     <button type="button" id="csvBtn" aria-label="CSV olarak dışa aktar">CSV</button>
   </div>
+  <div class="row" style="margin-top:8px">
+    <button type="button" id="bakBtn" style="flex:1">Yedek al</button>
+    <button type="button" id="impBtn" style="flex:1">Yedek yükle</button>
+  </div>
 </div>
+<input type="file" id="impFile" accept=".json,application/json" hidden>
 
 <main>
   <div class="warn" id="storeWarn" hidden>Telefon depolaması kullanılamıyor; veriler kalıcı kaydedilemeyebilir.</div>
@@ -381,6 +386,57 @@ $("csvBtn").addEventListener("click",function(){
   var blob=new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"});
   var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="onayli-modeller.csv";
   document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(a.href)},2000);
+});
+
+/* ---------- yedek al / yükle (fotoğraflar dahil) ---------- */
+function blobToB64(blob){
+  return new Promise(function(res,rej){
+    var fr=new FileReader();
+    fr.onload=function(){res(String(fr.result).split(",")[1]||"")};
+    fr.onerror=function(){rej(fr.error)};
+    fr.readAsDataURL(blob);
+  });
+}
+function b64ToBlob(b64,type){
+  var bin=atob(b64),len=bin.length,u8=new Uint8Array(len);
+  for(var i=0;i<len;i++)u8[i]=bin.charCodeAt(i);
+  return new Blob([u8],{type:type||"application/octet-stream"});
+}
+$("bakBtn").addEventListener("click",async function(){
+  var btn=$("bakBtn");btn.disabled=true;btn.textContent="Hazırlanıyor…";
+  try{
+    var files=[];
+    for(var i=0;i<rows.length;i++){
+      var fs=rows[i].dosyalar||[];
+      for(var k=0;k<fs.length;k++){
+        var rec=await getFile(fs[k].id);
+        if(rec&&rec.blob)files.push({id:fs[k].id,name:fs[k].name,type:fs[k].type,size:fs[k].size,data:await blobToB64(rec.blob)});
+      }
+    }
+    var out=JSON.stringify({app:"onayli-modeller",version:1,exported:new Date().toISOString(),rows:rows,files:files});
+    var blob=new Blob([out],{type:"application/json"});
+    var a=document.createElement("a");a.href=URL.createObjectURL(blob);
+    a.download="onayli-modeller-yedek.json";
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(function(){URL.revokeObjectURL(a.href)},4000);
+    toast("Yedek hazır ("+rows.length+" satır, "+files.length+" dosya).");
+  }catch(err){toast("Yedek alınamadı.")}
+  btn.disabled=false;btn.textContent="Yedek al";
+});
+$("impBtn").addEventListener("click",function(){$("impFile").value="";$("impFile").click()});
+$("impFile").addEventListener("change",async function(){
+  var f=($("impFile").files||[])[0];if(!f)return;
+  var btn=$("impBtn");btn.disabled=true;btn.textContent="Yükleniyor…";
+  try{
+    var d=JSON.parse(await f.text());
+    if(!d||d.app!=="onayli-modeller"||!Array.isArray(d.rows))throw new Error("bad");
+    var fl=d.files||[];
+    for(var i=0;i<fl.length;i++)await putFile({id:fl[i].id,blob:b64ToBlob(fl[i].data,fl[i].type)});
+    for(var j=0;j<d.rows.length;j++)await putRow(d.rows[j]);
+    await reload();render();
+    toast(d.rows.length+" satır ve "+fl.length+" dosya yüklendi.");
+  }catch(err){toast("Yedek dosyası okunamadı.")}
+  btn.disabled=false;btn.textContent="Yedek yükle";
 });
 
 /* ---------- başlat ---------- */
